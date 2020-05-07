@@ -5,6 +5,7 @@ import os
 import numpy as np
 import scipy
 from scipy import misc
+import matplotlib.pyplot as plt
 
 
 def get_filename_list(path, config):
@@ -20,7 +21,6 @@ def get_filename_list(path, config):
     label_filenames = [config["LABEL_PREFIX"] + name for name in label_filenames]
     return image_filenames, label_filenames
 
-
 def dataset_reader(filename_queue, config):  # prev name: CamVid_reader
 
     image_filename = filename_queue[0]  # tensor of type string
@@ -29,15 +29,43 @@ def dataset_reader(filename_queue, config):  # prev name: CamVid_reader
     # get png encoded image
     imageValue = tf.read_file(image_filename)
     labelValue = tf.read_file(label_filename)
+    
+    # In GTA5 dataset, sidewalk id is 4
+    sidewalk_class_id = tf.constant(4)
 
     # decodes a png image into a uint8 or uint16 tensor
     # returns a tensor of type dtype with shape [height, width, depth]
     image_bytes = tf.image.decode_png(imageValue)
-    label_bytes = tf.image.decode_png(labelValue)  # Labels are png, not jpeg
-
+    label_bytes = tf.image.decode_png(labelValue) # Labels are png, not jpeg
+    
     image = tf.reshape(image_bytes, (config["INPUT_HEIGHT"], config["INPUT_WIDTH"], config["INPUT_CHANNELS"]))
     label = tf.reshape(label_bytes, (config["INPUT_HEIGHT"], config["INPUT_WIDTH"], 1))
 
+    return image, label
+
+def dataset_gta5_reader(filename_queue, config):  # prev name: CamVid_reader
+
+    image_filename = filename_queue[0]  # tensor of type string
+    label_filename = filename_queue[1]  # tensor of type string
+    
+    # get png encoded image
+    imageValue = tf.read_file(image_filename)
+    labelValue = tf.read_file(label_filename)
+    
+    # In GTA5 dataset, sidewalk id is 4
+    #sidewalk_class_id = tf.constant(4, dtype=tf.dtypes.uint8)
+
+    # decodes a png image into a uint8 or uint16 tensor
+    # returns a tensor of type dtype with shape [height, width, depth]
+    image_bytes = tf.image.decode_png(imageValue)
+    label_bytes = tf.image.decode_png(labelValue)
+    
+    # label_bytes = tf.math.equal(tf.image.decode_png(labelValue), sidewalk_class_id) # Labels are png, not jpeg
+    # label_bytes_single_channel = tf.reduce_sum(tf.cast(label_bytes, tf.float32), 2)
+    
+    image = tf.reshape(image_bytes, (config["INPUT_HEIGHT"], config["INPUT_WIDTH"], config["INPUT_CHANNELS"]))
+    label = tf.reshape(label_bytes, (config["INPUT_HEIGHT"], config["INPUT_WIDTH"], 1))
+    
     return image, label
 
 
@@ -58,6 +86,22 @@ def dataset_inputs(image_filenames, label_filenames, batch_size, config):
                                            min_queue_examples, batch_size,
                                            shuffle=True)
 
+def dataset_gta5_inputs(image_filenames, label_filenames, batch_size, config):
+    images = ops.convert_to_tensor(image_filenames, dtype=dtypes.string)
+    labels = ops.convert_to_tensor(label_filenames, dtype=dtypes.string)
+
+    filename_queue = tf.train.slice_input_producer([images, labels], shuffle=True)
+
+    image, label = dataset_gta5_reader(filename_queue, config)
+    reshaped_image = tf.cast(image, tf.float32)
+    min_queue_examples = 300
+    print('Filling queue with %d input images before starting to train. '
+          'This may take some time.' % min_queue_examples)
+
+    # Generate a batch of images and labels by building up a queue of examples.
+    return _generate_image_and_label_batch(reshaped_image, label,
+                                           min_queue_examples, batch_size,
+                                           shuffle=True)
 
 def _generate_image_and_label_batch(image, label, min_queue_examples,
                                     batch_size, shuffle):

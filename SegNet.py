@@ -6,12 +6,12 @@ import numpy as np
 import random
 from layers_object import conv_layer, up_sampling, max_pool, initialization, \
     variable_with_weight_decay
-from evaluation_object import cal_loss, normal_loss, per_class_acc, get_hist, print_hist_summary, train_op, MAX_VOTE, var_calculate
-from inputs_object import get_filename_list, dataset_inputs, get_all_test_data
+from evaluation_object import cal_loss, cal_loss_gta5,  normal_loss, per_class_acc, get_hist, print_hist_summary, train_op, MAX_VOTE, var_calculate
+from inputs_object import get_filename_list, dataset_inputs, dataset_gta5_inputs, get_all_test_data
 from drawings_object import draw_plots_bayes, draw_plots_bayes_external
 from scipy import misc
 import time
-
+import matplotlib.pyplot as plt
 
 class SegNet:
     def __init__(self, conf_file="config.json"):
@@ -192,13 +192,103 @@ class SegNet:
                 self.saver = tf.train.Saver(tf.global_variables())
             self.saver.restore(self.sess, res_file)
 
+            
+    def train_gta5(self, max_steps=30001, batch_size=3):
+        # For train the bayes, the FLAG_OPT SHOULD BE SGD, BUT FOR TRAIN THE NORMAL SEGNET,
+        # THE FLAG_OPT SHOULD BE ADAM!!!
+
+        image_filename, label_filename = get_filename_list(self.train_file, self.config)
+        val_image_filename, val_label_filename = get_filename_list(self.val_file, self.config)
+        
+        with self.graph.as_default():
+            if self.images_tr is None:
+                self.images_tr, self.labels_tr = dataset_gta5_inputs(image_filename, label_filename, batch_size, self.config)
+                self.images_val, self.labels_val = dataset_gta5_inputs(val_image_filename, val_label_filename, batch_size,
+                                                                  self.config)
+
+            loss, accuracy, prediction = cal_loss_gta5(logits=self.logits, labels=self.labels_pl,
+                                                     number_class=self.num_classes)
+            train, global_step = train_op(total_loss=loss, opt=self.opt)
+
+            summary_op = tf.summary.merge_all()
+
+            with self.sess.as_default():
+                self.sess.run(tf.local_variables_initializer())
+                self.sess.run(tf.global_variables_initializer())
+
+                coord = tf.train.Coordinator()
+                threads = tf.train.start_queue_runners(coord=coord)
+                # The queue runners basic reference:
+                # https://www.tensorflow.org/versions/r0.12/how_tos/threading_and_queues
+                train_writer = tf.summary.FileWriter(self.tb_logs, self.sess.graph)
+                for step in range(100):
+                    
+                    image_batch, label_batch = self.sess.run([self.images_tr, self.labels_tr])
+                    
+                    
+                    feed_dict = {self.inputs_pl: image_batch,
+                                 self.labels_pl: label_batch,
+                                 self.is_training_pl: True,
+                                 self.keep_prob_pl: 0.5,
+                                 self.with_dropout_pl: True,
+                                 self.batch_size_pl: batch_size}
+
+                    _, _loss, _accuracy, summary = self.sess.run([train, loss, accuracy, summary_op],
+                                                                 feed_dict=feed_dict)
+                    self.train_loss.append(_loss)
+                    self.train_accuracy.append(_accuracy)
+                    print("Iteration {}: Train Loss{:6.3f}, Train Accu {:6.3f}".format(step, self.train_loss[-1],
+                                                                                       self.train_accuracy[-1]))
+
+                    if step % 100 == 0:
+                        conv_classifier = self.sess.run(self.logits, feed_dict=feed_dict)
+                        print('per_class accuracy by logits in training time',
+                              per_class_acc(conv_classifier, label_batch, self.num_classes))
+                        # per_class_acc is a function from utils
+                        train_writer.add_summary(summary, step)
+
+                    if step % 1000 == 0:
+                        print("start validating.......")
+                        _val_loss = []
+                        _val_acc = []
+                        hist = np.zeros((self.num_classes, self.num_classes))
+                        for test_step in range(int(20)):
+                            fetches_valid = [loss, accuracy, self.logits]
+                            image_batch_val, label_batch_val = self.sess.run([self.images_val, self.labels_val])
+                            feed_dict_valid = {self.inputs_pl: image_batch_val,
+                                               self.labels_pl: label_batch_val,
+                                               self.is_training_pl: True,
+                                               self.keep_prob_pl: 1.0,
+                                               self.with_dropout_pl: False,
+                                               self.batch_size_pl: batch_size}
+                            # since we still using mini-batch, so in the batch norm we set phase_train to be
+                            # true, and because we didin't run the trainop process, so it will not update
+                            # the weight!
+                            _loss, _acc, _val_pred = self.sess.run(fetches_valid, feed_dict_valid)
+                            _val_loss.append(_loss)
+                            _val_acc.append(_acc)
+                            hist += get_hist(_val_pred, label_batch_val)
+
+                        print_hist_summary(hist)
+
+                        self.val_loss.append(np.mean(_val_loss))
+                        self.val_acc.append(np.mean(_val_acc))
+
+                        print(
+                            "Iteration {}: Train Loss {:6.3f}, Train Acc {:6.3f}, Val Loss {:6.3f}, Val Acc {:6.3f}".format(
+                                step, self.train_loss[-1], self.train_accuracy[-1], self.val_loss[-1],
+                                self.val_acc[-1]))
+
+                coord.request_stop()
+                coord.join(threads)
+                
     def train(self, max_steps=30001, batch_size=3):
         # For train the bayes, the FLAG_OPT SHOULD BE SGD, BUT FOR TRAIN THE NORMAL SEGNET,
         # THE FLAG_OPT SHOULD BE ADAM!!!
 
         image_filename, label_filename = get_filename_list(self.train_file, self.config)
         val_image_filename, val_label_filename = get_filename_list(self.val_file, self.config)
-
+        
         with self.graph.as_default():
             if self.images_tr is None:
                 self.images_tr, self.labels_tr = dataset_inputs(image_filename, label_filename, batch_size, self.config)
@@ -222,6 +312,7 @@ class SegNet:
                 train_writer = tf.summary.FileWriter(self.tb_logs, self.sess.graph)
                 for step in range(max_steps):
                     image_batch, label_batch = self.sess.run([self.images_tr, self.labels_tr])
+                    print(np.unique(label_batch))
                     feed_dict = {self.inputs_pl: image_batch,
                                  self.labels_pl: label_batch,
                                  self.is_training_pl: True,
