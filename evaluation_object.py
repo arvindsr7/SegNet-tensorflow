@@ -30,23 +30,12 @@ def cal_loss(logits, labels, number_class):
 
 def cal_loss_gta5(logits, labels, number_class):
     loss_weight = np.array([
-        0.2595,
-        0.1826,
-        4.5640,
-        0.1417,
-        0.9051,
-        0.3826,
-        9.6446,
-        1.8418,
-        0.6823,
-        6.2478,
-        7.3614,
-        1.0974
+        0.801,
+        0.204,
     ])
-    # class 0 to 11, but the class 11 is ignored, so maybe the class 11 is background!
 
     labels = tf.to_int64(labels)
-    loss, accuracy, prediction = normal_loss(logits, labels, number_class=number_class)
+    loss, accuracy, prediction = weighted_loss(logits, labels, number_class=number_class, frequency=loss_weight)
     return loss, accuracy, prediction
 
 def weighted_loss(logits, labels, number_class, frequency):

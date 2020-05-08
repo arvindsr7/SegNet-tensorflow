@@ -221,10 +221,9 @@ class SegNet:
                 # The queue runners basic reference:
                 # https://www.tensorflow.org/versions/r0.12/how_tos/threading_and_queues
                 train_writer = tf.summary.FileWriter(self.tb_logs, self.sess.graph)
-                for step in range(100):
+                for step in range(max_steps):
                     
                     image_batch, label_batch = self.sess.run([self.images_tr, self.labels_tr])
-                    
                     
                     feed_dict = {self.inputs_pl: image_batch,
                                  self.labels_pl: label_batch,
