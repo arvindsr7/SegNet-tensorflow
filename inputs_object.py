@@ -155,3 +155,17 @@ def get_all_test_data(im_list, la_list):
 
     print('%d CamVid test images are loaded' % index)
     return images, labels
+
+def get_all_test_data_gta5(im_list, la_list):
+    images = []
+    labels = []
+    index = 0
+    for im_filename, la_filename in zip(im_list, la_list):
+        im = scipy.misc.imread(im_filename)
+        la = scipy.misc.imread(la_filename)
+        images.append(im)
+        labels.append(la)
+        index = index + 1
+    
+    print('%d GTA5 test images are loaded' % index)
+    return images, labels

@@ -1,0 +1,18 @@
+{
+    "TRAIN_FILE": "GTA5_dataset/sidewalk_data_v2/train.txt",
+    "VAL_FILE": "GTA5_dataset/sidewalk_data_v2/val.txt",
+    "TEST_FILE": "GTA5_dataset/sidewalk_data_v2/val.txt",
+    "IMG_PREFIX": "",
+    "LABEL_PREFIX": "",
+    "BAYES": true,
+    "OPT": "ADAM",
+    "SAVE_MODEL_DIR": "./segnet_vgg_bayes_MFL_17000/gta5_v2/model.ckpt-0",
+    "INPUT_HEIGHT": 338,
+    "INPUT_WIDTH": 600,
+    "INPUT_CHANNELS": 3,
+    "NUM_CLASSES": 11,
+    "USE_VGG": true,
+    "VGG_FILE": "vgg16.npy",
+    "TB_LOGS": "tensorboard_logs",
+    "BATCH_SIZE": 5
+}

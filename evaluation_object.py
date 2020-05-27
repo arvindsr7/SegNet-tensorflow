@@ -24,19 +24,116 @@ def cal_loss(logits, labels, number_class):
     ])
     # class 0 to 11, but the class 11 is ignored, so maybe the class 11 is background!
 
-    labels = tf.to_int64(labels)
+    labels = tf.to_int64( )
     loss, accuracy, prediction = weighted_loss(logits, labels, number_class=12, frequency=loss_weight)
     return loss, accuracy, prediction
 
+def cal_loss_gta5_v2(logits, labels, number_class):
+    """
+    Modified loss functions with: 
+        - only classes relevant to sidewalks used
+        - weight for sidewalk increased 
+        - new accuracy measure that amplified detection used 
+    Classes:
+        0 background
+        1 sidewalk
+        2 road
+        3 veg
+        4 building
+        5 fence
+        6 trafficsign
+        7 firehydrant
+        8 person
+        9 bikes
+        10 vehicles
+
+        Computed fractions: 
+        [
+        0.23975128696351541, 
+        0.2507147462990658, 
+        0.16095488789992088, 
+        0.07417991627042077, 
+        0.2352810984060984, 
+        0.012232230619511656, 
+        0.0018319206780745242, 
+        0.0007349405147719907, 
+        0.017041525215062206, 
+        0.0009230732839872778, 
+        0.027867874511862293
+        ]
+    """
+    # Make sure to edit loss weight in test_gta5_v2 as well if modified here. 
+    loss_weight = np.array([
+        0.25, 
+        5, 
+        1, 
+        1, 
+        1, 
+        1, 
+        1, 
+        1,
+        1,
+        1,
+        1
+        ])
+
+    labels = tf.to_int64(labels)
+    loss, accuracy, accuracy_sidewalk, accuracy_iou, prediction = weighted_loss_v2(logits, labels, number_class=number_class, frequency=loss_weight)
+    return loss, accuracy, accuracy_sidewalk, accuracy_iou, prediction
+
 def cal_loss_gta5(logits, labels, number_class):
     loss_weight = np.array([
-        0.801,
-        0.204,
+        0.5798636667907213, 
+        0.2507147462990658, 
+        0.017041525215062206, 
+        0.0007349405147719907, 
+        0.16095488789992088
     ])
 
     labels = tf.to_int64(labels)
     loss, accuracy, prediction = weighted_loss(logits, labels, number_class=number_class, frequency=loss_weight)
     return loss, accuracy, prediction
+
+def weighted_loss_v2(logits, labels, number_class, frequency):
+    """
+    Modifief weighted_loss function with:
+        - new accuracy measure that amplified detection used 
+    NOTE: Sidewalk class is 1 
+    """
+    # parameters
+    sidewalk_class = 1
+
+    label_flatten = tf.reshape(labels, [-1])
+    label_onehot = tf.one_hot(label_flatten, depth=number_class)
+    logits_reshape = tf.reshape(logits, [-1, number_class])
+    detected_flatten = tf.argmax(logits_reshape, -1)
+    cross_entropy = tf.nn.weighted_cross_entropy_with_logits(targets=label_onehot, logits=logits_reshape, pos_weight=frequency)
+    cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
+    tf.summary.scalar('loss', cross_entropy_mean)
+
+    # IOU sidewalk:
+    #   intersection (detection and actual sidwalk pixels) / union 
+    sidwalk_mask = tf.equal(label_flatten, sidewalk_class)
+    detected_sidewalk = tf.to_float(tf.equal(detected_flatten, sidewalk_class))
+    intersection_pixels = tf.reduce_sum(tf.to_float(tf.boolean_mask(detected_sidewalk, sidwalk_mask)))
+    union_pixels = tf.reduce_sum(tf.to_float(sidwalk_mask)) + tf.reduce_sum(detected_sidewalk) - intersection_pixels
+    accuracy_iou = intersection_pixels / union_pixels
+    
+    # accuracy sidewalk prediction: 
+    #   Find total number of sidewalk pixels accurately predicted; divide it by total sidewalk pixel labels
+    total_sidwalk_pixels = tf.reduce_sum(tf.to_float(sidwalk_mask))                                 
+    accuracy_sidewalk = intersection_pixels / total_sidwalk_pixels
+
+    # accuracy total:
+    #   accuracy over all classes
+    correct_prediction_total = tf.equal(detected_flatten, label_flatten)
+    accuracy = tf.reduce_mean(tf.to_float(correct_prediction_total))
+    
+    tf.summary.scalar('accuracy_total', accuracy)
+    tf.summary.scalar('accuracy_sidewalk', accuracy_sidewalk)
+    tf.summary.scalar('accuracy_iou', accuracy_iou)
+
+    return cross_entropy_mean, accuracy, accuracy_sidewalk, accuracy_iou, tf.argmax(logits_reshape, -1)
 
 def weighted_loss(logits, labels, number_class, frequency):
     """
@@ -114,7 +211,10 @@ def per_class_acc(predictions, label_tensor, num_class):
         else:
             acc = np.diag(hist)[ii] / float(hist.sum(1)[ii])
         print("    class # %d accuracy = %f " % (ii, acc))
-
+        # added from here
+        if ii == 0:
+            sidewalk_acc = acc
+    return sidewalk_acc
 
 def fast_hist(a, b, n):
     """
@@ -122,7 +222,6 @@ def fast_hist(a, b, n):
     """
     k = (a >= 0) & (a < n)
     return np.bincount(n * a[k].astype(int) + b[k], minlength=n ** 2).reshape(n, n)
-
 
 def get_hist(predictions, labels):
     """
@@ -134,7 +233,6 @@ def get_hist(predictions, labels):
     for i in range(batch_size):
         hist += fast_hist(labels[i].flatten(), predictions[i].argmax(2).flatten(), num_class)
     return hist
-
 
 def print_hist_summary(hist):
     """
@@ -150,7 +248,6 @@ def print_hist_summary(hist):
         else:
             acc = np.diag(hist)[ii] / float(hist.sum(1)[ii])
         print("    class # %d accuracy = %f " % (ii, acc))
-
 
 def train_op(total_loss, opt):
     """
@@ -217,8 +314,7 @@ def MAX_VOTE(pred,prob,NUM_CLASS):
         
      
     return variance_final,prediction
-    
-    
+        
 def var_calculate(pred,prob_variance):
     """
     Inputs: 
@@ -230,6 +326,28 @@ def var_calculate(pred,prob_variance):
         
     image_h = 360
     image_w = 480
+    NUM_CLASS = np.shape(prob_variance)[-1]
+    var_sep = [] #var_sep is the corresponding variance if this pixel choose label k
+    length_cur = 0 #length_cur represent how many pixels has been read for one images
+    for row in np.reshape(prob_variance,[image_h*image_w,NUM_CLASS]):
+        temp = row[pred[length_cur]]
+        length_cur += 1
+        var_sep.append(temp)
+    var_one = np.reshape(var_sep,[image_h,image_w]) #var_one is the corresponding variance in terms of the "optimal" label
+    
+    return var_one
+
+def var_calculate_gta5(pred,prob_variance):
+    """
+    Inputs: 
+    pred: predicted label, shape is [NUM_PIXEL,1]
+    prob_variance: the total variance for 12 classes wrt each pixel, prob_variance shape [image_h,image_w,12]
+    Output:
+    var_one: corresponding variance in terms of the "optimal" label
+    """
+        
+    image_h = 338
+    image_w = 600
     NUM_CLASS = np.shape(prob_variance)[-1]
     var_sep = [] #var_sep is the corresponding variance if this pixel choose label k
     length_cur = 0 #length_cur represent how many pixels has been read for one images
