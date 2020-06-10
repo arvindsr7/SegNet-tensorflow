@@ -1,7 +1,7 @@
 {
     "TRAIN_FILE": "GTA5_dataset/sidewalk_data/train.txt",
     "VAL_FILE": "GTA5_dataset/sidewalk_data/val.txt",
-    "TEST_FILE": "GTA5_dataset/sidewalk_data/train.txt",
+    "TEST_FILE": "GTA5_dataset/sidewalk_data/test.txt",
     "IMG_PREFIX": "",
     "LABEL_PREFIX": "",
     "BAYES": true,

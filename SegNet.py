@@ -8,10 +8,11 @@ from layers_object import conv_layer, up_sampling, max_pool, initialization, \
     variable_with_weight_decay
 from evaluation_object import cal_loss, cal_loss_gta5, cal_loss_gta5_v2, weighted_loss, weighted_loss_v2, normal_loss, per_class_acc, get_hist, print_hist_summary, train_op, MAX_VOTE, var_calculate, var_calculate_gta5
 from inputs_object import get_filename_list, dataset_inputs, dataset_gta5_inputs, get_all_test_data, get_all_test_data_gta5
-from drawings_object import draw_plots_bayes, draw_plots_bayes_external
+from drawings_object import draw_plots_bayes, draw_plots_bayes_external, writeImage
 from scipy import misc
 import time
 import matplotlib.pyplot as plt
+import cv2
 from tensorflow.python.tools.inspect_checkpoint import print_tensors_in_checkpoint_file
 
 class SegNet:
@@ -293,6 +294,10 @@ class SegNet:
                             Val Acc Sidewalk{:6.3f}  Val Acc IOU {:6.3f}".format(step, max_steps, self.train_loss[-1], \
                             self.train_accuracy[-1], self.val_loss[-1], self.val_acc[-1], self.val_acc_sidewalk[-1], \
                             self.val_acc_iou[-1]))
+                    
+                    if step % 5000 == 0:
+                        print("Save checkpoint at step =", step)
+                        self.save()
 
                 coord.request_stop()
                 coord.join(threads)
@@ -702,7 +707,9 @@ class SegNet:
                 var_tot.append(var_one)
             
             draw_plots_bayes(images, labels, pred_tot, var_tot)
-                
+    
+    
+    
     def visual_results_gta5(self, n_class=5, dataset_type = "TEST", images_index = 3, FLAG_MAX_VOTE = False):
         
         image_w = self.config["INPUT_WIDTH"]
@@ -776,17 +783,19 @@ class SegNet:
 
             # Keep images subset of length images_index
             images = [images[i] for i in indexes]
-            labels = [labels[i] for i in indexes]
+#             labels = [labels[i] for i in indexes]
+            labels = [np.ones((image_h,image_w)) for i in indexes]
             
             num_sample_generate = 30
             pred_tot = []
             var_tot = []
-            
+
             for image_batch, label_batch in zip(images,labels):
                 
                 image_batch = np.reshape(image_batch,[1,image_h,image_w,image_c])
                 label_batch = np.reshape(label_batch,[1,image_h,image_w,1])
-                
+#                 label_batch = np.zeros((1,image_h,image_w,1))
+    
                 if FLAG_BAYES is False:
                     fetches = [prediction]
                     feed_dict = {self.inputs_pl: image_batch, 
@@ -829,7 +838,87 @@ class SegNet:
                 var_tot.append(var_one)
             
             draw_plots_bayes(images, labels, pred_tot, var_tot)
+#             for image in pred_tot:
+#                 print(image.shape)
+#                 writeImage(image)
+    
+    def create_demo(self, images):
+        
+        image_w = self.config["INPUT_WIDTH"]
+        image_h = self.config["INPUT_HEIGHT"]
+        image_c = self.config["INPUT_CHANNELS"]
+        train_dir = self.config["SAVE_MODEL_DIR"]
+        FLAG_BAYES = self.config["BAYES"]
+        n_class = self.config["NUM_CLASSES"]
+        
+        images = [misc.imresize(image, (image_h, image_w)) for image in images]
+        
+        with self.sess as sess:
+            name_to_var_map = {var.op.name: var for var in tf.global_variables()}
+            #print(name_to_var_map)
+            name_to_var_map["conv1_1/biases"] = name_to_var_map["conv1_1/biases_1"]
+            name_to_var_map["conv1_2/biases"] = name_to_var_map["conv1_2/biases_1"]
+            name_to_var_map["conv2_1/biases"] = name_to_var_map["conv2_1/biases_1"]
+            name_to_var_map["conv2_2/biases"] = name_to_var_map["conv2_2/biases_1"]
+            name_to_var_map["conv3_1/biases"] = name_to_var_map["conv3_1/biases_1"]
+            name_to_var_map["conv3_2/biases"] = name_to_var_map["conv3_2/biases_1"]
+            name_to_var_map["conv3_3/biases"] = name_to_var_map["conv3_3/biases_1"]
+            name_to_var_map["conv4_1/biases"] = name_to_var_map["conv4_1/biases_1"]
+            name_to_var_map["conv4_2/biases"] = name_to_var_map["conv4_2/biases_1"]
+            name_to_var_map["conv4_3/biases"] = name_to_var_map["conv4_3/biases_1"]
+            name_to_var_map["conv5_1/biases"] = name_to_var_map["conv5_1/biases_1"]
+            name_to_var_map["conv5_2/biases"] = name_to_var_map["conv5_2/biases_1"]
+            name_to_var_map["conv5_3/biases"] = name_to_var_map["conv5_3/biases_1"]
+            del name_to_var_map["conv1_1/biases_1"]
+            del name_to_var_map["conv1_2/biases_1"]
+            del name_to_var_map["conv2_1/biases_1"]
+            del name_to_var_map["conv2_2/biases_1"]
+            del name_to_var_map["conv3_1/biases_1"]
+            del name_to_var_map["conv3_2/biases_1"]
+            del name_to_var_map["conv3_3/biases_1"]
+            del name_to_var_map["conv4_1/biases_1"]
+            del name_to_var_map["conv4_2/biases_1"]
+            del name_to_var_map["conv4_3/biases_1"]
+            del name_to_var_map["conv5_1/biases_1"]
+            del name_to_var_map["conv5_2/biases_1"]
+            del name_to_var_map["conv5_3/biases_1"]
             
+            saver = tf.train.Saver() #name_to_var_map)
+            saver.restore(sess, train_dir)
+            
+            _, _, prediction = cal_loss_gta5(self.logits, self.labels_pl, n_class)
+            prob = tf.nn.softmax(self.logits,dim = -1)
+            
+            pred_tot = []
+            var_tot = []
+            
+            labels = []
+            for i in range(len(images)):
+                
+                labels.append(np.ones((images[i].shape[0], images[i].shape[1])))
+            
+
+            for image_batch, label_batch in zip(images,labels):
+
+                image_batch = np.reshape(image_batch,[1, image_h, image_w, image_c])
+                label_batch = np.reshape(label_batch,[1, image_h, image_w, 1])
+                
+                fetches = [prediction]
+                feed_dict = {self.inputs_pl: image_batch, 
+                             self.labels_pl: label_batch, 
+                             self.is_training_pl: False, 
+                             self.keep_prob_pl: 0.5,
+                             self.with_dropout_pl: True,
+                             self.batch_size_pl: 1}
+                pred = sess.run(fetches = fetches, feed_dict = feed_dict)
+                pred = np.reshape(pred,[image_h,image_w])
+                
+                pred_tot.append(pred)
+            
+            pred_tot = [writeImage(pred_img) for pred_img in pred_tot]
+            return images, pred_tot
+
+                
     def visual_results_external_image(self, images, FLAG_MAX_VOTE = False):
         
         #train_dir = "./saved_models/segnet_vgg_bayes/segnet_vgg_bayes_30000/model.ckpt-30000"
@@ -850,7 +939,7 @@ class SegNet:
             
             # Restore saved session
             saver = tf.train.Saver()
-            saver.restore(sess, train_dir)
+           # saver.restore(sess, train_dir)
             
             _, _, prediction = cal_loss(logits=self.logits, 
                                            labels=self.labels_pl)
@@ -926,6 +1015,7 @@ class SegNet:
     def test_gta5_v2(self):
 
         image_filename, label_filename = get_filename_list(self.test_file, self.config)
+        train_dir = self.config["SAVE_MODEL_DIR"]
         loss_weight = np.array([
             0.25, 
             5, 
@@ -942,6 +1032,8 @@ class SegNet:
 
         with self.graph.as_default():
             with self.sess as sess:
+                saver = tf.train.Saver() #name_to_var_map) #
+                saver.restore(sess, train_dir) #
                 loss, accuracy, accuracy_sidewalk, accuracy_iou, prediction = weighted_loss_v2(self.logits, self.labels_pl, self.num_classes, frequency=loss_weight)
                 prob = tf.nn.softmax(self.logits, dim=-1)
                 prob = tf.reshape(prob, [self.input_h, self.input_w, self.num_classes])
@@ -1046,8 +1138,8 @@ class SegNet:
                         hist += get_hist(logit, label_batch)
 
                     acc_tot = np.diag(hist).sum() / hist.sum()
-                    acc_tot_sidewalk = np.mean(np.array(acc_final_sidewalk))
-                    acc_tot_iou = np.mean(np.array(acc_tot_iou))
+                    acc_tot_sidewalk = np.nanmean(np.array(acc_tot_sidewalk))
+                    acc_tot_iou = np.nanmean(np.array(acc_tot_iou))
                     iu = np.diag(hist) / (hist.sum(1) + hist.sum(0) - np.diag(hist))
 
                     print("Total Accuracy for test image: ", acc_tot)
@@ -1062,14 +1154,44 @@ class SegNet:
                     iu_final.append(iu)
                     iu_mean_final.append(np.nanmean(iu))
 
-            return acc_final, acc_final_sidewalk, acc_final_iou, iu_final, iu_mean_final, prob_variance, logit_variance, pred_tot, var_tot
+            return acc_final, ac_final_sidewalk, acc_final_iou, iu_final, iu_mean_final, prob_variance, logit_variance, pred_tot, var_tot
                         
     def test_gta5(self):
         image_filename, label_filename = get_filename_list(self.test_file, self.config)
         train_dir = self.config["SAVE_MODEL_DIR"]
         with self.graph.as_default():
             with self.sess as sess:
-                saver = tf.train.Saver() #name_to_var_map)
+                
+                name_to_var_map = {var.op.name: var for var in tf.global_variables()}
+                #print(name_to_var_map)
+                name_to_var_map["conv1_1/biases"] = name_to_var_map["conv1_1/biases_1"]
+                name_to_var_map["conv1_2/biases"] = name_to_var_map["conv1_2/biases_1"]
+                name_to_var_map["conv2_1/biases"] = name_to_var_map["conv2_1/biases_1"]
+                name_to_var_map["conv2_2/biases"] = name_to_var_map["conv2_2/biases_1"]
+                name_to_var_map["conv3_1/biases"] = name_to_var_map["conv3_1/biases_1"]
+                name_to_var_map["conv3_2/biases"] = name_to_var_map["conv3_2/biases_1"]
+                name_to_var_map["conv3_3/biases"] = name_to_var_map["conv3_3/biases_1"]
+                name_to_var_map["conv4_1/biases"] = name_to_var_map["conv4_1/biases_1"]
+                name_to_var_map["conv4_2/biases"] = name_to_var_map["conv4_2/biases_1"]
+                name_to_var_map["conv4_3/biases"] = name_to_var_map["conv4_3/biases_1"]
+                name_to_var_map["conv5_1/biases"] = name_to_var_map["conv5_1/biases_1"]
+                name_to_var_map["conv5_2/biases"] = name_to_var_map["conv5_2/biases_1"]
+                name_to_var_map["conv5_3/biases"] = name_to_var_map["conv5_3/biases_1"]
+                del name_to_var_map["conv1_1/biases_1"]
+                del name_to_var_map["conv1_2/biases_1"]
+                del name_to_var_map["conv2_1/biases_1"]
+                del name_to_var_map["conv2_2/biases_1"]
+                del name_to_var_map["conv3_1/biases_1"]
+                del name_to_var_map["conv3_2/biases_1"]
+                del name_to_var_map["conv3_3/biases_1"]
+                del name_to_var_map["conv4_1/biases_1"]
+                del name_to_var_map["conv4_2/biases_1"]
+                del name_to_var_map["conv4_3/biases_1"]
+                del name_to_var_map["conv5_1/biases_1"]
+                del name_to_var_map["conv5_2/biases_1"]
+                del name_to_var_map["conv5_3/biases_1"]
+                
+                saver = tf.train.Saver(name_to_var_map)
                 saver.restore(sess, train_dir)
                 loss, accuracy, prediction = cal_loss_gta5(self.logits, self.labels_pl, self.num_classes)
                 prob = tf.nn.softmax(self.logits, dim=-1)
